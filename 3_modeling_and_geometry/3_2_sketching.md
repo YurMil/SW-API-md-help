@@ -30,12 +30,12 @@ public class SketchCreator
         ISketchManager sketchMgr = model.SketchManager;
         if (sketchMgr == null) return;
 
-        // 1. Select the Front Plane for the sketch
-        // Note: For localized SolidWorks versions (e.g. Russian), the plane name is "Спереди"
+        // 1. Select the sketch plane (e.g. "Front Plane")
+        // Localized installations may use localized plane names (e.g. "Plan de face" in French, "Ebene vorne" in German, "Спереди" in Russian)
         bool planeSelected = model.Extension.SelectByID2("Front Plane", "PLANE", 0, 0, 0, false, 0, null, 0);
         if (!planeSelected)
         {
-            // Fallback for Russian localized name
+            // Fallback for localized installation names
             model.Extension.SelectByID2("Спереди", "PLANE", 0, 0, 0, false, 0, null, 0);
         }
 
@@ -122,7 +122,7 @@ public void Create3DSketch(IModelDoc2 model)
 ## ⚠️ Known Issues and Developer Rules
 
 1.  **Plane Name Localization:**
-    Standard planes are named `"Front Plane"`, `"Top Plane"`, and `"Right Plane"` in English, but are named `"Спереди"`, `"Сверху"`, and `"Справа"` in Russian. Check for both names or parse tree features dynamically to avoid failure.
+    Standard planes are named `"Front Plane"`, `"Top Plane"`, and `"Right Plane"` in English, but are localized in non-English SOLIDWORKS installations (for example, `"Plan de face"` in French, `"Ebene vorne"` in German, or `"Спереди"` in Russian). In international environments, inspect the FeatureManager tree dynamically by feature type (`"RefPlane"`) instead of relying on hardcoded English strings.
 2.  **Sketch Left Open (Ghost State):**
     If a sketch is not visible or editable after your program finishes, verify that you called `InsertSketch(true)` a second time to save and exit the sketch mode.
 3.  **System Value Units:**

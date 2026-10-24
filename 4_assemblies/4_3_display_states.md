@@ -1,6 +1,6 @@
 # 4.3. Display States and Visual Customization in SolidWorks using C#
 
-**Display States** (Состояния отображения) in SolidWorks allow developers to control visual properties of components (such as visibility, transparency, display modes, and appearances/colors) inside assemblies without creating new physical configurations. This is extremely useful for generating customized drawing views, highlighted assembly states, and rendering setups.
+**Display States** in SolidWorks allow developers to control visual properties of components (such as visibility, transparency, display modes, and appearances/colors) inside assemblies without creating new physical configurations. This is extremely useful for generating customized drawing views, highlighted assembly states, and rendering setups.
 
 ---
 

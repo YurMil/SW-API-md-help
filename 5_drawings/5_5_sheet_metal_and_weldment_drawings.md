@@ -261,40 +261,40 @@ public void FilterDrawingViewToSingleBody(IDrawingDoc drawing, string viewName, 
 
 ---
 
-## 📐 Умная простановка размеров деталей из листового металла (Smart Dimensioning)
+## 📐 Smart Dimensioning for Sheet Metal Parts
 
-Стандартные методы `AutoDimension` и `InsertModelAnnotations4` часто приводят к загромождению чертежа сотнями ненужных размеров для деталей из листового металла (включая все углы гибов, размеры эскизов, толщину на каждом вырезе и т.д.).
+Standard SOLIDWORKS methods like `AutoDimension` and `InsertModelAnnotations4` often clutter sheet metal drawings with hundreds of unnecessary dimensions (including every bend angle, internal sketch radius, duplicate thickness callouts on cutouts, etc.).
 
-Чтобы чертеж был чистым и соответствовал правилам оформления листового металла, рекомендуется использовать **программную классификацию кромок (Edge Classification)** и выборочную простановку размеров (`AddDimension2`).
+To produce clean, industry-standard sheet metal drawings, automate dimensioning using **programmatic edge classification** and selective dimension placement (`AddDimension2`).
 
-### Ключевые принципы оформления деталей из листового металла:
-1. **Габаритные размеры**: Ширина и высота по крайним точкам (на всех видах).
-2. **Толщина металла**: Только 1 размер для демонстрации толщины листа (не на развертке).
-3. **Отверстия**: Группировка по диаметру. Указание диаметра с префиксом количества (например, `5x ⌀8.5mm`).
-4. **Позиции отверстий**: Только расстояния от базовых кромок до первого отверстия в группе (привязка).
-5. **Вырезы (не круглые)**: Ширина, высота и 2 размера привязки от краев детали.
-6. **Гибы (Bends)**: Длина отгиба (Flange length) и радиус гиба. Размеры углов обычно не ставятся.
-7. **Развертка (Flat Pattern)**: Только габариты, отверстия и размеры от краев до **линий гиба** (Bend Lines).
+### Core Rules for Sheet Metal Drawings:
+1. **Overall Dimensions**: Place total width and height across outer boundaries (on all primary views).
+2. **Sheet Thickness**: Place exactly 1 thickness dimension on a side/edge view (never on the flat pattern).
+3. **Holes**: Group circular holes by diameter. Call out the diameter with a quantity prefix (e.g. `5x ⌀8.5mm`).
+4. **Hole Positions**: Dimension hole positions from the part's primary reference edges to the first hole in each pattern or group.
+5. **Cutouts (Non-Circular)**: Place width, height, and two reference offset dimensions from outer part edges.
+6. **Bends (Formed Views)**: Dimension flange length and bend radius. Avoid cluttering views with bend angle dimensions.
+7. **Flat Pattern**: Place overall blank dimensions, hole diameters/positions, and distance from outer edges to **Bend Lines**.
 
-### Архитектура модуля (C#)
-Для реализации такого подхода необходимо читать геометрию непосредственно из вида (`IView.GetVisibleEntities2`), преобразовывать координаты модели в координаты листа чертежа (`IView.ModelToViewTransform`) и определять фичерсы, которым принадлежат кромки (`IFace2.GetFeature`).
+### Implementation Architecture (C#)
+To implement this approach, read geometry directly from the drawing view (`IView.GetVisibleEntities2`), transform model coordinates into drawing sheet coordinates (`IView.ModelToViewTransform`), and determine which feature owns each edge (`IFace2.GetFeature`).
 
-#### 1. Чтение геометрии вида и преобразование координат
-Размеры в SOLIDWORKS (`AddDimension2`) ставятся в координатах листа (метрах от нижнего левого угла основной надписи), а геометрия кромок (`IEdge`, `IVertex`) хранится в координатах модели.
+#### 1. Reading View Geometry and Transforming Coordinates
+Dimensions created with `AddDimension2` are placed in **Sheet Space** (meters measured from the bottom-left corner of the drawing sheet format), while model geometry (`IEdge`, `IVertex`) is stored in **Model Space**.
 
 ```csharp
-// Получение матрицы трансформации Вид -> Лист
+// Get the transformation matrix from Model space to Sheet space
 IMathTransform xform = (IMathTransform)view.ModelToViewTransform;
 IMathUtility mathUtil = (IMathUtility)swApp.GetMathUtility();
 
-// Конвертация точки
+// Convert a 3D model point to sheet coordinates
 IMathPoint mp = (IMathPoint)mathUtil.CreatePoint(modelPointArray);
 IMathPoint tp = (IMathPoint)mp.MultiplyTransform(xform);
 double[] sheetCoords = (double[])tp.ArrayData;
 ```
 
-#### 2. Определение типа элемента (Гиб, Вырез)
-Кромка сама по себе не знает, чем она является. Нужно получить смежные грани, а от них — фичерс.
+#### 2. Determining Feature Types (Bend, Cutout, Flange)
+An edge (`IEdge`) does not directly report what feature created it. Retrieve its adjacent faces, and inspect the parent feature from the face:
 
 ```csharp
 Feature GetEdgeFeature(Edge edge)
@@ -308,13 +308,13 @@ Feature GetEdgeFeature(Edge edge)
     return null;
 }
 
-// Примеры типов фичерсов (Feature.GetTypeName2):
-// "EdgeFlange", "Hem", "Jog", "SketchBend", "SM3dBend", "SMMiteredFlange", "MiterFlange"
-// "NormalCut", "CutExtrude"
+// Common feature type names (Feature.GetTypeName2()):
+// Sheet metal bends: "EdgeFlange", "Hem", "Jog", "SketchBend", "SM3dBend", "SMMiteredFlange", "MiterFlange"
+// Cutouts: "NormalCut", "CutExtrude"
 ```
 
-#### 3. Размеры линий гиба на развертке (Flat Pattern)
-На развертке линии гиба не являются кромками (`IEdge`), это сегменты эскиза (`ISketchSegment`), и их нужно получать через специальный метод `IView.GetBendLines()`.
+#### 3. Dimensioning Bend Lines on Flat Patterns
+On a flat pattern view, bend lines are not physical edges (`IEdge`). They are 2D sketch segments (`ISketchSegment`). Retrieve them using the specialized method `IView.GetBendLines()`:
 
 ```csharp
 if (view.IsFlatPatternView())
@@ -324,20 +324,24 @@ if (view.IsFlatPatternView())
     {
         foreach (SketchSegment bendSeg in bendLines)
         {
-            // Для выбора сегмента используем метод Select4 самого сегмента:
+            // Select the bend line sketch segment directly:
             // bendSeg.Select4(append, selData);
-            // Запрещено пытаться привести SketchSegment к (Entity) для выбора!
+            // Note: Do not cast SketchSegment to (Entity) for selection; use Select4 directly on SketchSegment.
         }
     }
 }
 ```
 
-#### 4. Подавление всплывающих диалоговых окон
-При программном вызове `AddDimension2` SOLIDWORKS попытается открыть окно "Ввод размера", что заморозит выполнение скрипта (или создаст "призрачный" процесс).
+#### 4. Suppressing the "Modify Dimension" Pop-up Dialog
+When calling `AddDimension2` programmatically, SOLIDWORKS may display the interactive "Modify Dimension" value pop-up. This modal dialog pauses execution and causes ghost background processes.
 
-Обязательно подавляйте эту опцию:
+Always suppress this setting during automated dimensioning:
 ```csharp
+// Suppress dimension value prompt
 swApp.SetUserPreferenceToggle((int)swUserPreferenceToggle_e.swInputDimValOnCreate, false);
-// ... создание размеров ...
+
+// ... Place dimensions via AddDimension2 ...
+
+// Restore original setting
 swApp.SetUserPreferenceToggle((int)swUserPreferenceToggle_e.swInputDimValOnCreate, true);
 ```

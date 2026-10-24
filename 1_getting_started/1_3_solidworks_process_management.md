@@ -1,27 +1,27 @@
-# 1.3. Управление процессами SOLIDWORKS и устранение «призрачных» экземпляров (.NET 8 / 9 / 10)
+# 1.3. SolidWorks Process Management & Anti-Ghosting (.NET 8 / 9 / 10)
 
-При разработке приложений, автоматизирующих SOLIDWORKS через COM API на C# (.NET 8, .NET 9, .NET 10), разработчики часто сталкиваются с проблемой **«призрачных процессов» (ghost processes)** — когда после завершения или аварийного прерывания скрипта в Диспетчере задач Windows накапливаются висящие процессы `SLDWORKS.exe`.
+When developing C# applications that automate SOLIDWORKS via the COM API (.NET 8, .NET 9, .NET 10), developers often encounter **ghost processes**. A ghost process is an orphaned `SLDWORKS.exe` process that stays running in the background in Windows Task Manager after the script finishes or crashes.
 
-Накопление таких процессов («расслоение» или stacking) приводит к исчерпанию оперативной памяти, взаимоблокировкам файлов моделей (ошибки доступа при повторном открытии) и невозможности подключиться к САПР.
-
----
-
-## 1. Основные причины расслоения и зависания процессов
-
-1. **Неосвобожденные COM-ссылки (Runtime Callable Wrappers — RCW):**  
-   В среде .NET сборщик мусора (GC) не отслеживает внутренний счетчик ссылок COM-сервера. Если в C# удерживаются ссылки на `IModelDoc2`, `IView`, `IFeature` или корневой `ISldWorks`, процесс SOLIDWORKS не сможет завершиться даже после закрытия окна пользователем.
-2. **Несовпадение прав UAC (Integrity Level Mismatch):**  
-   Если SOLIDWORKS запущен от имени обычного пользователя, а IDE (Visual Studio, Rider) или консоль запущена **«От имени Администратора»** (или наоборот), Windows блокирует чтение таблицы активных объектов (ROT). В результате вызов `GetActiveObject` завершается ошибкой, и скрипт каждый раз создает **новый фоновый дубликат** процесса.
-3. **Отсутствие метода `Marshal.GetActiveObject` в .NET Core / .NET 8+:**  
-   Попытка использовать устаревший вызов из .NET Framework 4.8 приводит к ошибке компиляции или падению в рантайме.
-4. **Зависшие диалоговые окна (User Prompts):**  
-   Процесс ждет ответа пользователя (например, запрос на сохранение изменений, предупреждение о перестроении или окно ввода значения размера), работая в невидимом фоновом режиме.
+When ghost processes accumulate ("process stacking"), they consume system RAM, lock 3D model files (causing file access errors), and prevent new automation scripts from connecting to SOLIDWORKS.
 
 ---
 
-## 2. Надежный менеджер процессов для .NET 8 / 9 / 10 (C#)
+## 1. Why Ghost Processes Occur
 
-Ниже представлен проверенный enterprise-шаблон подключения и контроля жизненного цикла, готовый к компиляции в современных версиях .NET:
+1. **Unreleased COM References (Runtime Callable Wrappers - RCW):**  
+   In .NET, the Garbage Collector (GC) does not track unmanaged COM reference counts automatically. If your C# code keeps active references to `IModelDoc2`, `IView`, `IFeature`, or the root `ISldWorks` object, the SOLIDWORKS COM server cannot shut down even after the user closes the main window.
+2. **UAC Elevation Mismatch (Standard User vs Administrator):**  
+   If SOLIDWORKS is running under a standard user account, but your terminal or IDE (Visual Studio / Rider) runs **as Administrator** (or vice versa), Windows security blocks access to the Running Object Table (ROT). Because `GetActiveObject` fails, the script spawns a **new duplicate background process** on every run.
+3. **Missing `Marshal.GetActiveObject` in Modern .NET (.NET Core / 8+):**  
+   Calling the legacy method from .NET Framework 4.8 results in compilation errors or runtime exceptions.
+4. **Hanging Modal Dialogs (User Prompts):**  
+   The process waits for a user response (for example, "Save changes?", rebuild warnings, or the "Modify Dimension" value prompt) while running in invisible background mode.
+
+---
+
+## 2. Reliable Process Manager for .NET 8 / 9 / 10 (C#)
+
+The following C# class provides a verified pattern for connecting to an existing instance or starting a new one safely:
 
 ```csharp
 using System;
@@ -35,10 +35,10 @@ namespace SolidWorksAutomation
 {
     public static class SwProcessManager
     {
-        // Официальный CLSID приложения SOLIDWORKS
+        // Official SOLIDWORKS application CLSID
         private static readonly Guid SldWorksClsid = new("96749377-3391-11D2-9EE3-00C04F797396");
 
-        // Прямой P/Invoke вызов Win32 OLE для работы в современном .NET (вместо удаленного Marshal.GetActiveObject)
+        // Native Win32 OLE call for modern .NET (replaces the removed Marshal.GetActiveObject)
         [DllImport("oleaut32.dll", PreserveSig = false)]
         private static extern void GetActiveObject(
             ref Guid rclsid,
@@ -46,61 +46,61 @@ namespace SolidWorksAutomation
             [MarshalAs(UnmanagedType.IUnknown)] out object ppunk);
 
         /// <summary>
-        /// Подключается к работающему SOLIDWORKS или безопасно запускает новый экземпляр.
+        /// Connects to a running SOLIDWORKS instance or starts a new one safely.
         /// </summary>
         public static ISldWorks ConnectOrStart(bool makeVisible = true)
         {
-            // 1. Устраняем зависшие невидимые фоновые процессы от предыдущих сессий
+            // 1. Terminate orphaned background ghost processes from earlier runs
             KillGhostProcesses();
 
             ISldWorks? swApp = null;
 
-            // 2. Пробуем подключиться к активному экземпляру через ROT
+            // 2. Try to connect to an active instance via ROT
             try
             {
                 Guid clsid = SldWorksClsid;
                 GetActiveObject(ref clsid, IntPtr.Zero, out object activeComObj);
                 swApp = activeComObj as ISldWorks 
-                    ?? throw new InvalidCastException("Объект из ROT не реализует интерфейс ISldWorks.");
+                    ?? throw new InvalidCastException("ROT object does not implement ISldWorks.");
 
-                Console.WriteLine("Успешно подключено к работающему экземпляру SOLIDWORKS.");
+                Console.WriteLine("Connected to running SOLIDWORKS instance.");
                 return swApp;
             }
             catch (COMException)
             {
-                Console.WriteLine("Активный экземпляр в ROT не найден.");
+                Console.WriteLine("No active instance found in ROT.");
 
-                // 3. Проверка на несовпадение прав UAC (Administrator vs Standard User)
+                // 3. Detect UAC privilege mismatch (Administrator vs Standard User)
                 if (HasVisibleSolidWorksWindow())
                 {
                     throw new InvalidOperationException(
-                        "Обнаружено открытое окно SOLIDWORKS, но подключение заблокировано. " +
-                        "Запустите ваше приложение и SOLIDWORKS с одинаковыми правами доступа (оба без прав админа или оба от администратора).");
+                        "An open SOLIDWORKS window was found, but connection was blocked by Windows security. " +
+                        "Run both your application and SOLIDWORKS with the same user privileges (both as standard user or both as Administrator).");
                 }
             }
 
-            // 4. Если активных процессов нет, запускаем новый экземпляр через ProgID
-            Console.WriteLine("Запуск нового процесса SOLIDWORKS...");
+            // 4. If no running instance was found, start a new one via ProgID
+            Console.WriteLine("Starting a new SOLIDWORKS process...");
             Type? swType = Type.GetTypeFromProgID("SldWorks.Application")
-                ?? throw new InvalidOperationException("ProgID 'SldWorks.Application' не зарегистрирован в системе.");
+                ?? throw new InvalidOperationException("ProgID 'SldWorks.Application' is not registered on this system.");
 
             object created = Activator.CreateInstance(swType)
-                ?? throw new InvalidOperationException("Не удалось создать экземпляр SldWorks.Application.");
+                ?? throw new InvalidOperationException("Failed to create SldWorks.Application instance.");
 
             swApp = created as ISldWorks
-                ?? throw new InvalidCastException("Созданный объект не реализует ISldWorks.");
+                ?? throw new InvalidCastException("Created object does not implement ISldWorks.");
 
             swApp.Visible = makeVisible;
 
-            // 5. Ожидаем готовности COM-интерфейса (предотвращает ошибку RPC_E_SERVERCALL_RETRYLATER 0x8001010A)
+            // 5. Wait for the COM message pump to be ready (prevents RPC_E_SERVERCALL_RETRYLATER 0x8001010A)
             WaitForMessagePump(swApp);
 
-            Console.WriteLine($"SOLIDWORKS запущен и готов к работе. Версия: {swApp.RevisionNumber()}");
+            Console.WriteLine($"SOLIDWORKS is ready. Revision: {swApp.RevisionNumber()}");
             return swApp;
         }
 
         /// <summary>
-        /// Ожидает полной инициализации очереди сообщений COM-сервера.
+        /// Waits until the COM message pump is ready to handle calls.
         /// </summary>
         private static void WaitForMessagePump(ISldWorks swApp)
         {
@@ -119,8 +119,8 @@ namespace SolidWorksAutomation
         }
 
         /// <summary>
-        /// Завершает исключительно фоновые «призрачные» процессы (без заголовка окна),
-        /// не затрагивая окна с активной работой пользователя.
+        /// Terminates only background ghost processes (processes without a main window title).
+        /// Active user sessions with a visible window title are preserved.
         /// </summary>
         public static void KillGhostProcesses()
         {
@@ -129,30 +129,30 @@ namespace SolidWorksAutomation
                 Process[] processes = Process.GetProcessesByName("SLDWORKS");
                 foreach (Process p in processes)
                 {
-                    // Процесс считается фоновым "призраком", если у него нет заголовка главного окна
+                    // A process is a ghost if it has no window title
                     if (string.IsNullOrEmpty(p.MainWindowTitle))
                     {
                         try
                         {
-                            Console.WriteLine($"Завершение фонового процесса-призрака (PID: {p.Id})...");
+                            Console.WriteLine($"Terminating background ghost process (PID: {p.Id})...");
                             p.Kill();
                             p.WaitForExit(3000);
                         }
                         catch (Exception ex)
                         {
-                            Console.WriteLine($"Не удалось завершить процесс {p.Id}: {ex.Message}");
+                            Console.WriteLine($"Could not kill process {p.Id}: {ex.Message}");
                         }
                     }
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Ошибка сканирования процессов: {ex.Message}");
+                Console.WriteLine($"Error scanning processes: {ex.Message}");
             }
         }
 
         /// <summary>
-        /// Проверяет, запущен ли SOLIDWORKS с видимым графическим интерфейсом.
+        /// Checks whether SOLIDWORKS is currently running with a visible GUI window title.
         /// </summary>
         public static bool HasVisibleSolidWorksWindow()
         {
@@ -166,7 +166,7 @@ namespace SolidWorksAutomation
         }
 
         /// <summary>
-        /// Корректно закрывает ссылку на COM-объект и принудительно вызывает GC.
+        /// Releases the root COM reference cleanly and forces garbage collection.
         /// </summary>
         public static void SafeRelease(ref ISldWorks? swApp, bool closeApp = false)
         {
@@ -183,12 +183,12 @@ namespace SolidWorksAutomation
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Предупреждение при освобождении COM-объекта: {ex.Message}");
+                Console.WriteLine($"Warning when releasing COM object: {ex.Message}");
             }
             finally
             {
                 swApp = null;
-                // Принудительный сбор нереференцированных RCW
+                // Force collection of unreferenced RCW wrappers
                 GC.Collect();
                 GC.WaitForPendingFinalizers();
                 GC.Collect();
@@ -200,9 +200,9 @@ namespace SolidWorksAutomation
 
 ---
 
-## 3. Правильное завершение скрипта и освобождение памяти
+## 3. Safe Shutdown Pattern
 
-Чтобы процесс не зависал в памяти, корневой блок приложения должен оборачивать работу в `try...finally`:
+Always wrap automation workflows in `try...finally` to ensure the COM reference is released:
 
 ```csharp
 ISldWorks? swApp = null;
@@ -210,42 +210,42 @@ try
 {
     swApp = SwProcessManager.ConnectOrStart(makeVisible: true);
     
-    // Основная бизнес-логика автоматизации
+    // Core automation logic
     var activeDoc = swApp.IActiveDoc2;
-    Console.WriteLine($"Текущий документ: {activeDoc?.GetTitle() ?? "нет"}");
+    Console.WriteLine($"Active document: {activeDoc?.GetTitle() ?? "None"}");
 }
 catch (Exception ex)
 {
-    Console.WriteLine($"Ошибка выполнения: {ex.Message}");
+    Console.WriteLine($"Execution error: {ex.Message}");
 }
 finally
 {
-    // Безопасное освобождение ссылки (без завершения процесса пользователя)
+    // Release COM references cleanly (keep the user's SOLIDWORKS window open)
     SwProcessManager.SafeRelease(ref swApp, closeApp: false);
 }
 ```
 
 ---
 
-## 4. Подавление всплывающих диалоговых окон при автоматизации
+## 4. Suppressing Dialog Prompts in Automated Workflows
 
-В процессе автоматизации (открытие файлов, простановка размеров, экспорт) всплывающие модальные окна могут полностью заблокировать скрипт. Рекомендуется отключать их на время пакетной обработки:
+During automated batch operations (such as opening files, adding dimensions, or exporting), pop-up modal dialogs can pause execution. Suppress these dialogs before running batch code:
 
 ```csharp
-// 1. Подавление окна ввода значения размера при его создании
+// 1. Suppress the "Modify Dimension" input pop-up when adding dimensions
 bool prevDimPrompt = swApp.GetUserPreferenceToggle((int)swUserPreferenceToggle_e.swInputDimValOnCreate);
 swApp.SetUserPreferenceToggle((int)swUserPreferenceToggle_e.swInputDimValOnCreate, false);
 
-// 2. Подавление диалога автовосстановления (Auto-Recover)
+// 2. Suppress the auto-recovery dialog prompt
 bool prevAutoRecover = swApp.GetUserPreferenceToggle((int)swUserPreferenceToggle_e.swShowAutoRecoverDialog);
 swApp.SetUserPreferenceToggle((int)swUserPreferenceToggle_e.swShowAutoRecoverDialog, false);
 
-// 3. Установка флага пакетной команды
+// 3. Set the external batch command flag
 swApp.CommandInProgress = true;
 
 try
 {
-    // ... Выполнение генерации чертежей / простановки размеров ...
+    // ... Generate drawings or place dimensions ...
 }
 finally
 {
