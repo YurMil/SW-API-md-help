@@ -84,6 +84,10 @@ The knowledge base is divided into logical categories. Each article contains det
 *   [**9.4. Modeler and Temporary Bodies**](9_geometry_and_topology/9_4_modeler_and_temporary_bodies.md)  
     *Creating temporary body geometries in memory using `IModeler` and performing Boolean operations (Union, Subtract, Intersect).*
 
+### 10. AI & Hardware Acceleration (GPU & NPU)
+*   [**10.1. Local ONNX, GPU & NPU Automation**](10_ai_and_hardware_acceleration/10_1_local_onnx_gpu_npu_automation.md)  
+    *In-process lightweight machine learning (1M–50M parameters) using ONNX Runtime with DirectML, CUDA, and NPU acceleration: B-Rep GNNs for DFM routing, automated weld bevel selection (ISO 9692-1), 3D geometric duplicate search, smart drawing orientation, and YOLOv11-nano visual drawing norm-control.*
+
 ---
 
 ## 🛠 Modern .NET Quick Start Rules
