@@ -1,0 +1,5 @@
+<Solution>
+  <Folder Name="/tests/">
+    <Project Path="tests/SwApiHelp.Tests/SwApiHelp.Tests.csproj" />
+  </Folder>
+</Solution>

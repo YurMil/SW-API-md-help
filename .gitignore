@@ -1,0 +1,36 @@
+# Visual Studio / .NET
+[Bb]in/
+[Oo]bj/
+[Dd]ebug/
+[Rr]elease/
+*.user
+*.userosscache
+*.sln.docstates
+*.suo
+.vs/
+.idea/
+.vscode/
+
+# Build artifacts & packages
+*.7z
+*.zip
+*.tar.gz
+*.exe
+*.dll
+*.pdb
+
+# Local test workbench & submodules
+# (SolidWorksTester is maintained in https://github.com/YurMil/SolidWorksTester)
+[Tt]estig folder/
+[Tt]esting folder/
+[Tt]est files/
+log/
+*.log
+tmp/
+
+# OS generated files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.DS_Store
